@@ -1,0 +1,124 @@
+---
+title: "Simulated RCT--read the data"
+author: "Harold Pollack"
+date: "3/3/2021"
+output:
+  html_document: default
+  word_document: default
+---
+
+
+```{r setup, include=FALSE}
+library("dplyr")
+library("ivreg")
+library("Hmisc")
+library("ggplot2")
+library("hrbrthemes")
+library("tidyr")
+library("viridis")
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r, read RCT data}
+#
+#  dest_path is the directory where you have placed the csv file
+#
+dest_path<-"/Users/haroldpollack/documents/SSA_456_2021/"
+dest_filename<-"tutoring_RCT.csv"
+complete_file_name<-paste0(dest_path,dest_filename)
+v_data_frame<-read.csv(complete_file_name)
+str(v_data_frame)
+t.test(urban ~ Z, data = v_data_frame)
+t.test(woman ~ Z, data = v_data_frame)
+
+#str(v_data_frame)
+#describe(v_data_frame)
+model_score_nodose<-lm(score ~ woman+urban, data = v_data_frame)
+summary(model_score_nodose)
+
+model_dose<-lm(dose ~ woman+urban+Z, data = v_data_frame)
+summary(model_dose)
+
+model_score<-lm(score ~ dose+woman+urban, data = v_data_frame)
+summary(model_score)
+model_score_Z_and_confounders<-lm(score ~ woman+urban+Z, data = v_data_frame)
+summary(model_score_Z_and_confounders)
+model_score_Z_only<-lm(score ~ Z, data = v_data_frame)
+summary(model_score_Z_only)
+
+aggregate(x = v_data_frame$dose,    
+          by = list(v_data_frame$Z),        
+          FUN = mean)    
+
+aggregate(x = v_data_frame$score,     
+          by = list(v_data_frame$Z),  
+          FUN = mean)                 
+ 
+
+ivreg_rct = ivreg(score~dose+woman+urban | woman+urban+Z,data=v_data_frame)
+summary(ivreg_rct,diagnostics=TRUE)
+table(v_data_frame$woman)
+
+#
+#   Reduced form
+#
+model_dose_Z<-lm(dose ~ Z, data = v_data_frame)
+summary(model_dose_Z)
+model_score_Z<-lm(score ~ Z, data = v_data_frame)
+summary(model_score_Z)
+
+
+
+```
+
+densities
+
+```{r, densities, echo=TRUE}
+v_data_frame$fwoman <- factor(v_data_frame$woman,levels=c(0,1),labels=c("other","women"))
+v_data_frame$furban <- factor(v_data_frame$urban,levels=c(0,1),labels=c("other","urban"))
+v_data_frame$fZ <- factor(v_data_frame$Z,levels=c(0,1),labels=c("Control","Treatment"))
+
+p1 <- ggplot(data=v_data_frame, aes(x=dose, group=fwoman, fill=fwoman)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p1 + ggtitle("Tutoring dose by gender") +
+  xlab("Tutoring dose") + ylab("Density")
+
+p2 <- ggplot(data=v_data_frame, aes(x=dose, group=furban, fill=furban)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p2 + ggtitle("Tutoring dose by Urbanicity") +
+  xlab("Tutoring dose") + ylab("Density")
+
+p3 <- ggplot(data=v_data_frame, aes(x=score, group=fwoman, fill=fwoman)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p3 + ggtitle("Test score by gender") +
+  xlab("Test score") + ylab("Density")
+
+p4 <- ggplot(data=v_data_frame, aes(x=score, group=furban, fill=furban)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p4 + ggtitle("Test score by Urbanicity") +
+  xlab("Test score") + ylab("Density")
+
+
+p5 <- ggplot(data=v_data_frame, aes(x=dose, group=fZ, fill=fZ)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p5 + ggtitle("Tutoring dose by Treatment assignment") +
+  xlab("Tutoring dose") + ylab("Density")
+
+p6 <- ggplot(data=v_data_frame, aes(x=score, group=fZ, fill=fZ)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p6 + ggtitle("Test score by Treatment assignment") +
+  xlab("Test score") + ylab("Density")
+
+
+
+
+```
