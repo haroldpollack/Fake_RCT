@@ -4,4 +4,5 @@ Contains several files:
 2. R code to analyze these data.
 3. Some basic homework questions
 Test scores are a function of the tutoring, gender, and urbanicity.
+Includes Wald treatment estimator and its 95% bootstrap confidence interval
 Used in SSA 456
