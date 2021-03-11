@@ -1,0 +1,319 @@
+---
+title: "Simulated RCT--read the data"
+author: "Harold Pollack"
+date: "3/9/2021"
+output:
+  html_document: default
+  word_document: default
+---
+
+
+```{r setup, include=FALSE}
+library("dplyr")
+library("ivreg")
+library("Hmisc")
+library("ggplot2")
+library("hrbrthemes")
+library("tidyr")
+library("viridis")
+library("boot")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+
+```{r, read RCT data, echo=TRUE}
+#
+#  dest_path is the directory where you have placed the csv file
+#
+#
+# number of bootstrap replicates
+#
+n_bootstrap <- 5000
+
+dest_path<-"/Users/haroldpollack/documents/SSA_456_2021/"
+dest_filename<-"tutoring_RCT.csv"
+complete_file_name<-paste0(dest_path,dest_filename)
+v_data_frame<-read.csv(complete_file_name)
+str(v_data_frame)
+paste("Check baseline balance of urbanicity.")
+t.test(urban ~ Z, data = v_data_frame)
+paste("Check baseline balance of gender.")
+t.test(woman ~ Z, data = v_data_frame)
+
+#str(v_data_frame)
+#describe(v_data_frame)
+paste("Regression analysis of test scores as a function of gender and urbanicity alone.")
+model_score_nodose<-lm(score ~ woman+urban, data = v_data_frame)
+summary(model_score_nodose)
+
+paste("Regression analysis of tutoring dose as a function of gender and urbanicity alone.")
+paste("Wow--women get much less tutoring. Urban residents get much more. This could be an important issue.")
+model_dose_noZ<-lm(dose ~ woman+urban, data = v_data_frame)
+summary(model_dose_noZ)
+
+paste("Now add Z.")
+paste("Regression analysis of tutoring dose as a function of treatment group Z alone.")
+model_dose_Z_alone<-lm(dose ~ Z, data = v_data_frame)
+summary(model_dose_Z_alone)
+
+paste("Here's a regression analysis of tutoring dose as a function of gender, urbanicity, and treatment group Z.")
+paste("We want a strong coefficient on Z so we can use it as an instrumental variable for dosage.")
+paste("What happens to the other coefficients?")
+
+model_dose_Z<-lm(dose ~ woman+urban+Z, data = v_data_frame)
+summary(model_dose_Z)
+
+
+#paste("Regression analysis of test scores as a function of gender and urbanicity, and tutoring dose.")
+#paste("You might think this makes things better because dose is an important confounder. But controlling for it creates other issues. We don't know how people self-select into tutoring. So the other coefficients could still be biased. For example, the highly motivated men may be the ones with high takeup. This can upward-bias the dosage coefficient and downward-bias the male coefficient.")
+#model_score<-lm(score ~ dose+woman+urban, data = v_data_frame)
+#summary(model_score)
+
+paste("Regression analysis of test scores as a function of gender, urbanicity, plus treatment group Z.")
+paste("Note that the only directly interpretable coefficient is the coefficient on Z. Gender and urbanicity will be potentially biased if they are correlated with dose.")
+model_score_Z_and_confounders<-lm(score ~ woman+urban+Z, data = v_data_frame)
+summary(model_score_Z_and_confounders)
+
+paste("Regression analysis of test scores as a function of treatment group Z alone. And look how similar the Z-coefficients are. Good randomization.")
+model_score_Z_only<-lm(score ~ Z, data = v_data_frame)
+summary(model_score_Z_only)
+
+
+paste("Now let's do the IV analysis of test scores as a function of gender, urbanicity, and tutoring dose. Ignore the diagnostics for now")
+paste("Look what happens to the coefficients on women and urbanicity--They flip.")
+ivreg_rct = ivreg(score~dose+woman+urban | woman+urban+Z,data=v_data_frame)
+summary(ivreg_rct,diagnostics=TRUE)
+
+#ivreg_rct$coefficients
+dose_coef<- ivreg_rct$coefficients[2]
+#dose_coef
+#summary(dose_coef)
+#mean(dose_coef)
+```
+
+Two-stage least squares
+
+```{r, 2sls, echo=TRUE}
+#
+#    2sls
+#
+paste("Now let's do conventional two-stage least squares and see how it compares to ivreg.")
+paste("First stage equation using Z to instrument for dose")
+ols_first <- lm(dose ~ woman+urban+Z, data = v_data_frame)
+summary(ols_first)
+v_data_frame$dose_hat <- fitted(ols_first)
+paste("Second stage equation using predicted dose from the first stage")
+ols_second <- lm(score ~ dose_hat+woman+urban, data = v_data_frame)
+summary(ols_second)
+paste("Note that the coefficients exactly match what we got in ivreg. Standard errors a little different.")
+paste("Let's run the analogous regression uninstrumented relationships.")
+paste("Regression analysis of test scores as a function of gender and urbanicity, and uninstrumented tutoring dose.")
+paste("Everything will be effed-up by selection bias. ")
+paste("You might think this makes things better because dose is an important confounder. Nope. Everything is effed-up by selection bias. We thnk we are helping by including dose in the model. But we don't know how people self-select into tutoring. So the other coefficients are biased.")
+
+paste("Dose coefficient is way upward biased.")
+paste("This leads the woman coefficient to be way upward biased to fit the women's data, sinc most women weren't tutored.")
+paste("Urban coefficient is way downward biased to fit the data there.")
+ols_unstrumented <- lm(score ~ dose+woman+urban, data = v_data_frame)
+summary(ols_unstrumented)
+v_data_frame$score_hat <- fitted(ols_unstrumented)
+#ggplot(v_data_frame,aes(dose,score_hat)+geom_point())
+#
+#    Note to self: Go back and include the score_error term
+#
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_point(aes(y = score_error), color = "yellow") + 
+  geom_line(aes(y = score_hat), color="steelblue",size=2)
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_point(aes(y = score_error), color = "yellow") + 
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(urban ~woman)
+v_data_frame$F_urban <- factor(v_data_frame$urban,
+levels = c(0,1),
+labels = c("non-urban", "urban"))
+v_data_frame$F_woman <- factor(v_data_frame$woman,
+levels = c(0,1),
+labels = c("Other gender", "Woman"))
+v_data_frame$F_Z <- factor(v_data_frame$Z,
+levels = c(0,1),
+labels = c("Control group", "Treatment group"))
+v_data_frame$F_urban_woman<- factor(v_data_frame$urban+2*v_data_frame$woman,
+levels = c(0,1,2,3),
+labels = c("Rural male", "urban male","rural woman","urban woman"))
+ols_score_error <- lm(score_error ~ dose+F_urban_woman, data = v_data_frame)
+summary(ols_score_error)
+v_data_frame$score_error_hat <- fitted(ols_score_error)
+ols_group_score <- lm(score ~ F_urban_woman, data = v_data_frame)
+summary(ols_group_score)
+v_data_frame$group_score_hat <- fitted(ols_group_score)
+
+ols_score_error <- lm(score_error ~ dose+F_urban_woman, data = v_data_frame)
+summary(ols_score_error)
+v_data_frame$meaned_score_error_hat <- fitted(ols_score_error)+v_data_frame$group_score_hat
+
+
+# 
+# interaction
+#
+v_data_frame$dose_Z<-v_data_frame$dose*v_data_frame$Z
+v_data_frame$dose_Z_urban<-v_data_frame$dose*v_data_frame$Z*v_data_frame$urban
+v_data_frame$dose_Z_woman<-v_data_frame$dose*v_data_frame$Z*v_data_frame$woman
+ols_interaction <- lm(score ~ dose+urban+woman+dose_Z, data = v_data_frame)
+summary(ols_interaction)
+v_data_frame$dose_factors<-v_data_frame$dose*v_data_frame$Z*v_data_frame$F_urban_woman
+ols_interaction_full <- lm(score ~ dose+urban+woman+dose_Z+dose_Z_woman+dose_Z_urban, data = v_data_frame)
+summary(ols_interaction_full)
+v_data_frame$score_interaction_hat <- fitted(ols_interaction_full)
+
+ols_score_dose_only <- lm(score ~ dose, data = v_data_frame)
+summary(ols_score_dose_only)
+v_data_frame$score_dose_only_hat <- fitted(ols_score_dose_only)
+p_dose_only <-ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_line(aes(y = score_dose_only_hat), color="steelblue", linetype="twodash",size=2)
+p_dose_only_facets<- ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_line(aes(y = score_dose_only_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(F_urban ~F_woman)
+p_dose_only+ggtitle("Regressing score on dose")
+p_dose_only_facets+ggtitle("Regressing score on dose--stratified by gender and urbanicity")
+
+#
+#    Plots
+#
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(F_urban ~F_woman)
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(F_urban ~F_Z)
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(F_woman ~F_Z)
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_point(aes(y = score_error), color = "yellow") + 
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(F_urban_woman ~F_Z)
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_point(aes(y = score_error), color = "yellow") +
+  geom_point(aes(y = meaned_score_error_hat), color = "red") +
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_grid(F_urban_woman ~F_Z)
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  #geom_point(aes(y = score_error), color = "yellow") +
+  geom_point(aes(y = meaned_score_error_hat), color = "red") +
+  labs(title="Test scores (dots) vs. dose. Red line is fitted residual vs. dose.") +
+  facet_grid(F_urban_woman ~F_Z)
+
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  #geom_point(aes(y = score_error), color = "yellow") +
+  geom_point(aes(y = score_interaction_hat), color = "red") +
+  labs(title="Test scores (dots) vs. dose. Red line is fitted score in full interaction model vs. dose.") +
+  facet_grid(F_urban_woman ~F_Z)
+
+ggplot(v_data_frame, aes(x=dose)) + 
+  geom_point(aes(y = score), color = "darkred") + 
+  geom_line(aes(y = score_hat), color="steelblue", linetype="twodash",size=2)+facet_wrap(~F_Z)
+
+```
+
+
+
+Bootstrapping
+
+```{r, bootstrapping, echo=TRUE}
+paste("Now let's do the Wald estimator, with and without bootstrapping.")
+v1<- aggregate(x = v_data_frame$dose,    
+          by = list(v_data_frame$Z),        
+          FUN = mean)    
+
+v2<- aggregate(x = v_data_frame$score,     
+          by = list(v_data_frame$Z),  
+          FUN = mean)                 
+paste("Here's the Wald estimator of the value of tutoring (per dose)",(v2[2,2]-v2[1,2])/(v1[2,2]-v1[1,2]))
+
+#
+# Bootstrap 95% CI for Wald estimator
+Wald_ratio <- function(data, indices) {
+  d <- data[indices,] # allows boot to select sample
+   v1<- aggregate(x = d$dose,    
+                   by = list(d$Z),        
+                   FUN = mean)    
+    
+    v2<- aggregate(x = d$score,     
+                   by = list(d$Z),  
+                   FUN = mean)   
+    d<-(v2[2,2]-v2[1,2])/(v1[2,2]-v1[1,2])
+  return(d)
+}
+#
+# bootstrapping with B replications
+#
+results <- boot(data=v_data_frame, statistic=Wald_ratio,
+   R=n_bootstrap)
+results
+paste0("Bootstrap histogram of Wald estimator for TOT treatment effect, qplot to test normality w/",n_bootstrap," replications. Yup-simulated normal data looks normal.") 
+plot(results)
+#
+#     95% CI and median
+#
+bs_estimates<-tibble(results$t)
+LB<-round(0.025*n_bootstrap)
+med<-round(0.50*n_bootstrap)
+UB<-round(0.975*n_bootstrap)
+bs_estimates<-bs_estimates[order(results$t),]
+paste0("95% confidence interval of Wald estimate of TOT treatment effect: (", round(bs_estimates[LB,],digits=2)," , ",round(bs_estimates[UB,],digits=2),")") 
+paste0("Median Wald estimate of TOT treatment effect: ", round(bs_estimates[med,],digits=2)," , Almost identical IVREG coefficient ", round(dose_coef,digits=2)) 
+paste("I was rather surprised by how similar the Wald estimator was to the TOT. The beauty of large-N simulated data that follows the normal distribution.") 
+```
+
+
+Now let's plot some densities
+
+```{r, densities, echo=FALSE}
+v_data_frame$fwoman <- factor(v_data_frame$woman,levels=c(0,1),labels=c("other","women"))
+v_data_frame$furban <- factor(v_data_frame$urban,levels=c(0,1),labels=c("other","urban"))
+v_data_frame$fZ <- factor(v_data_frame$Z,levels=c(0,1),labels=c("Control","Treatment"))
+
+p1 <- ggplot(data=v_data_frame, aes(x=dose, group=fwoman, fill=fwoman)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p1 + ggtitle("Tutoring dose by gender") +
+  xlab("Tutoring dose") + ylab("Density")
+
+p2 <- ggplot(data=v_data_frame, aes(x=dose, group=furban, fill=furban)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p2 + ggtitle("Tutoring dose by Urbanicity") +
+  xlab("Tutoring dose") + ylab("Density")
+
+p3 <- ggplot(data=v_data_frame, aes(x=score, group=fwoman, fill=fwoman)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p3 + ggtitle("Test score by gender") +
+  xlab("Test score") + ylab("Density")
+
+p4 <- ggplot(data=v_data_frame, aes(x=score, group=furban, fill=furban)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p4 + ggtitle("Test score by Urbanicity") +
+  xlab("Test score") + ylab("Density")
+
+
+p5 <- ggplot(data=v_data_frame, aes(x=dose, group=fZ, fill=fZ)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p5 + ggtitle("Tutoring dose by Treatment assignment") +
+  xlab("Tutoring dose") + ylab("Density")
+
+p6 <- ggplot(data=v_data_frame, aes(x=score, group=fZ, fill=fZ)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+p6 + ggtitle("Test score by Treatment assignment") +
+  xlab("Test score") + ylab("Density")
+
+
+```
